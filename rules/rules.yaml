@@ -1,0 +1,268 @@
+# =============================================================================
+# Banner fingerprint rules
+# =============================================================================
+#
+# This file is DATA, not code: the server loads it at startup and hot-reloads it
+# when it changes on disk (see FP_RULES / -rules). Add or tune detections here
+# without touching or rebuilding Go code.
+#
+# Rule fields
+# -----------
+#   id          unique rule name (reported as rule_id when ?explain=1)
+#   priority    higher wins; rules are evaluated high -> low, first match stops
+#   protocol    protocol name reported in the result (SSH, HTTP, MySQL, ...)
+#   product     product name; supports {capture} templates
+#   version     version template, e.g. "{version}"
+#   confidence  0..1 score reported with the result
+#   ports       optional port allow-list; empty/omitted = any port
+#   banner_any  at least one regex must match the banner
+#   banner_all  every regex must match the banner
+#   banner_none no regex may match the banner (veto)
+#   os_hint     list of {name, regex}; first matching regex sets os_hint
+#
+# Named capture groups (?P<name>...) of the matching regexes are available to
+# the product / version / os_hint name templates as {name}.
+# =============================================================================
+version: 1
+
+rules:
+  # ---------------------------------------------------------------------------
+  # SSH
+  # ---------------------------------------------------------------------------
+  - id: ssh-openssh
+    description: 'OpenSSH identification string, e.g. "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3"'
+    priority: 100
+    protocol: SSH
+    product: OpenSSH
+    version: "{version}"
+    confidence: 0.95
+    banner_any:
+      - '^SSH-[0-9.]+-OpenSSH_(?P<version>[0-9][0-9A-Za-z._p]*)'
+    os_hint:
+      - { name: Ubuntu,   regex: '(?i)\bubuntu\b' }
+      - { name: Debian,   regex: '(?i)\bdebian\b' }
+      - { name: Raspbian, regex: '(?i)\braspbian\b' }
+      - { name: CentOS,   regex: '(?i)\bcentos\b' }
+      - { name: FreeBSD,  regex: '(?i)\bfreebsd\b' }
+
+  - id: ssh-dropbear
+    description: 'Dropbear SSH identification string'
+    priority: 99
+    protocol: SSH
+    product: Dropbear
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '^SSH-[0-9.]+-dropbear(?:_(?P<version>[0-9][0-9A-Za-z._]*))?'
+
+  - id: ssh-generic
+    description: 'Any SSH-2.0/SSH-1.99 identification string'
+    priority: 90
+    protocol: SSH
+    product: "{product}"
+    version: "{version}"
+    confidence: 0.75
+    banner_any:
+      - '^SSH-[0-9.]+-(?P<product>[^_\s]+)(?:_(?P<version>[^\s]+))?'
+
+  # ---------------------------------------------------------------------------
+  # HTTP servers (Server: header, or a bare status line)
+  # ---------------------------------------------------------------------------
+  - id: http-nginx
+    description: 'nginx via "Server: nginx/x.y.z"'
+    priority: 95
+    protocol: HTTP
+    product: nginx
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?im)^Server:\s*nginx/(?P<version>[0-9][0-9A-Za-z._-]*)'
+      - '(?im)^Server:\s*nginx\b'
+    os_hint:
+      - { name: Ubuntu, regex: '(?i)\bubuntu\b' }
+      - { name: Debian, regex: '(?i)\bdebian\b' }
+
+  - id: http-apache
+    description: 'Apache httpd via "Server: Apache/x.y.z"'
+    priority: 95
+    protocol: HTTP
+    product: Apache
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?im)^Server:\s*Apache/(?P<version>[0-9][0-9A-Za-z._-]*)'
+      - '(?im)^Server:\s*Apache\b'
+    os_hint:
+      - { name: Ubuntu, regex: '(?i)\bubuntu\b' }
+      - { name: Debian, regex: '(?i)\bdebian\b' }
+      - { name: CentOS, regex: '(?i)\bcentos\b' }
+
+  - id: http-jetty
+    description: 'Eclipse Jetty via "Server: Jetty/9.4.51"'
+    priority: 94
+    protocol: HTTP
+    product: Jetty
+    version: "{version}"
+    confidence: 0.85
+    banner_any:
+      - '(?im)^Server:\s*Jetty/\(?(?P<version>[0-9][0-9A-Za-z._-]*)'
+      - '(?im)^Server:\s*Jetty\b'
+
+  - id: http-iis
+    description: 'Microsoft IIS via "Server: Microsoft-IIS/10.0"'
+    priority: 94
+    protocol: HTTP
+    product: Microsoft-IIS
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?im)^Server:\s*Microsoft-IIS/(?P<version>[0-9][0-9A-Za-z._-]*)'
+      - '(?im)^Server:\s*Microsoft-IIS\b'
+
+  - id: http-tomcat
+    description: 'Apache Tomcat via "Server: Apache-Coyote/1.1" or "Server: Tomcat"'
+    priority: 93
+    protocol: HTTP
+    product: Tomcat
+    version: "{version}"
+    confidence: 0.8
+    banner_any:
+      - '(?im)^Server:\s*Apache-Coyote/(?P<version>[0-9][0-9A-Za-z._-]*)'
+      - '(?im)^Server:\s*Tomcat(?:/(?P<version>[0-9][0-9A-Za-z._-]*))?'
+
+  - id: http-generic-server
+    description: 'Any other "Server: <product>/<version>" header'
+    priority: 72
+    protocol: HTTP
+    product: "{product}"
+    version: "{version}"
+    confidence: 0.7
+    banner_any:
+      - '(?im)^Server:\s*(?P<product>[^\s;/()]+)(?:/(?P<version>[^\s;()]+))?'
+
+  - id: http-generic
+    description: 'HTTP response status line without a usable Server header'
+    priority: 70
+    protocol: HTTP
+    confidence: 0.6
+    banner_any:
+      - '(?im)^HTTP/[0-9]\.[0-9] [0-9]{3}(\s|$)'
+
+  # ---------------------------------------------------------------------------
+  # Database / cache
+  # ---------------------------------------------------------------------------
+  - id: mysql-greeting
+    description: 'MySQL handshake packet (4-byte header + 0x0a + version)'
+    priority: 95
+    protocol: MySQL
+    product: MySQL
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?s)^.{4}\x0a\s*(?P<version>[0-9]+\.[0-9]+\.[0-9]+)'
+      - '(?s)\x00(?P<version>[0-9]+\.[0-9]+\.[0-9]+)\x00'
+
+  - id: mysql-port-version
+    description: 'MySQL/mariaDB greeting on 3306 whose NUL framing was mangled by the scanner'
+    priority: 80
+    protocol: MySQL
+    product: MySQL
+    version: "{version}"
+    confidence: 0.8
+    ports: [3306]
+    banner_any:
+      - '(?s)(?:\\x00|[^0-9A-Za-z])(?P<version>[0-9]+\.[0-9]+\.[0-9]+)'
+
+  - id: redis-reply
+    description: 'Redis RESP reply (inline error, +PONG, -NOAUTH, ...)'
+    priority: 92
+    protocol: Redis
+    product: Redis
+    confidence: 0.7
+    banner_any:
+      - '(?s)^[-+*$:]'
+      - '(?i)\b(?:ERR|NOAUTH|WRONGTYPE|NOPROTO|PONG|LOADING|MASTERDOWN)\b'
+
+  - id: redis-port-only
+    description: 'Anything answering on 6379 that no higher-priority rule claimed'
+    priority: 55
+    protocol: Redis
+    product: Redis
+    confidence: 0.5
+    ports: [6379]
+    banner_any:
+      - '(?s)^.*$'
+
+  # ---------------------------------------------------------------------------
+  # FTP
+  # ---------------------------------------------------------------------------
+  - id: ftp-proftpd
+    description: 'ProFTPD greeting, e.g. "220 ProFTPD 1.3.7 Server (ProFTPD)"'
+    priority: 96
+    protocol: FTP
+    product: ProFTPD
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?im)^220[ -].*?ProFTPD[ /]?(?P<version>[0-9][0-9A-Za-z._-]*)?'
+
+  - id: ftp-vsftpd
+    description: 'vsftpd greeting, e.g. "220 (vsFTPd 3.0.5)"'
+    priority: 96
+    protocol: FTP
+    product: vsFTPd
+    version: "{version}"
+    confidence: 0.9
+    banner_any:
+      - '(?im)^220[ -].*?vsFTPd[ /]?(?P<version>[0-9][0-9A-Za-z._-]*)?'
+
+  - id: ftp-pureftpd
+    description: 'Pure-FTPd greeting'
+    priority: 95
+    protocol: FTP
+    product: Pure-FTPd
+    confidence: 0.85
+    banner_any:
+      - '(?i)^220[ -].*?Pure-FTPd'
+
+  - id: ftp-generic
+    description: 'Generic FTP 220 greeting (not SMTP, which is matched earlier)'
+    priority: 73
+    protocol: FTP
+    confidence: 0.65
+    banner_any:
+      - '(?m)^220[ -]'
+    banner_none:
+      - '(?i)(?:esmtp|smtp)'
+
+  # ---------------------------------------------------------------------------
+  # Mail
+  # ---------------------------------------------------------------------------
+  - id: smtp-postfix
+    description: 'Postfix SMTP greeting'
+    priority: 93
+    protocol: SMTP
+    product: Postfix
+    confidence: 0.85
+    banner_any:
+      - '(?im)^220[ -].*?\bPostfix\b'
+
+  - id: smtp-generic
+    description: 'Generic SMTP/ESMTP greeting'
+    priority: 91
+    protocol: SMTP
+    confidence: 0.75
+    banner_any:
+      - '(?im)^220[ -].*?\b(?:ESMTP|SMTP)\b'
+
+  # ---------------------------------------------------------------------------
+  # Transport security: a TLS ServerHello/ClientHello record header
+  # ---------------------------------------------------------------------------
+  - id: tls-handshake
+    description: 'TLS record header (0x16 0x03 0x0x)'
+    priority: 60
+    protocol: TLS
+    confidence: 0.6
+    banner_any:
+      - '^\x16\x03[\x00-\x04]'
+      - '^\\x16\\x03\\x0[0-4]'

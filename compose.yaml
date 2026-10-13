@@ -1,0 +1,104 @@
+# =============================================================================
+# banner-fingerprint - one command local/production-style deployment
+#
+#   docker compose up --build           # server + one-shot demo client
+#   curl -sS -X POST 127.0.0.1:8080/fingerprint -d @samples/input.json
+#   docker compose run --rm client -input /data/input-messy.txt   # your own data
+#   docker compose down
+#
+# Design notes (why it looks like this)
+# -------------------------------------
+# * Network: only the server publishes a port, and only on the host loopback
+#   (127.0.0.1:8080). The client reaches the API exclusively over the compose
+#   bridge by service name (http://server:8080) - service discovery instead of
+#   hardcoded addresses, nothing else is exposed to the outside world.
+# * Startup order: the client waits for `condition: service_healthy`, i.e. for
+#   a real HTTP probe against /health, not just for the process to be created.
+# * Hardening: read-only root filesystem, all Linux capabilities dropped,
+#   no-new-privileges, non-root UID 65532, pids/memory/CPU limits.
+# * Rules: ./rules is bind-mounted read-only onto /etc/fingerprint, and the
+#   server hot-reloads the file when it changes (15s poll, or SIGHUP) - editing
+#   detection rules never requires rebuilding or restarting anything.
+# =============================================================================
+name: banner-fingerprint
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  user: "65532:65532"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  server:
+    image: ${FP_IMAGE:-banner-fingerprint:local}
+    build:
+      context: .
+      target: runtime
+      args:
+        VERSION: ${FP_VERSION:-local}
+    restart: unless-stopped
+    command: ["-addr", ":8080", "-rules", "/etc/fingerprint/rules.yaml"]
+    environment:
+      FP_LOG_LEVEL: ${FP_LOG_LEVEL:-info}
+      FP_RULES_WATCH: ${FP_RULES_WATCH:-15s}
+      FP_MAX_BODY_MB: ${FP_MAX_BODY_MB:-16}
+    volumes:
+      - ./rules:/etc/fingerprint:ro
+    # Published on loopback only: reachable for verification, never from the LAN.
+    ports:
+      - "127.0.0.1:8080:8080"
+    <<: *hardening
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    pids_limit: 256
+    mem_limit: 256m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "/app/fingerprint-server", "-healthcheck", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [fingerprint]
+    logging: *logging
+
+  # One-shot demo: reads the bundled sample file, prints the identification
+  # table and exits. Point it at your own export with
+  #   docker compose run --rm client -input /data/<your-file>
+  # (mount extra files under ./samples, which is shared read-only as /data).
+  client:
+    image: ${FP_IMAGE:-banner-fingerprint:local}
+    build:
+      context: .
+      target: runtime
+      args:
+        VERSION: ${FP_VERSION:-local}
+    depends_on:
+      server:
+        condition: service_healthy
+    entrypoint: ["/app/fingerprint-client"]
+    # Talks to the server over the compose network - no host port involved.
+    command: ["-url", "http://server:8080", "-input", "/data/input.json", "-format", "table"]
+    environment:
+      FP_SERVER_URL: http://server:8080
+    volumes:
+      - ./samples:/data:ro
+    <<: *hardening
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.5
+    restart: "no"
+    networks: [fingerprint]
+    logging: *logging
+
+networks:
+  fingerprint:
+    driver: bridge

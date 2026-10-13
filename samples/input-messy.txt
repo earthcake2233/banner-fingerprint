@@ -1,0 +1,7 @@
+[
+  {"ip": "1.2.3.4",  "port": 22,    "banner": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3"},
+  {"ip": "1.2.3.7",  "port": 3306,  "banner": "J\x00\x00\x00\n8.0.32\x00"},
+  {"ip": "1.2.3.14", "port": 3306,  "banner": "J\x00\x00\x00\n5.7.42\x00"},
+  {"ip": "1.2.3.19", "port": 9999,  "banner": "\x16\x03\x01\x00\xa5\x01\x00\x00\xa1"},
+  {"ip": "1.2.3.23", "port": 12345, "banner": "QUIT\r\n"}
+]

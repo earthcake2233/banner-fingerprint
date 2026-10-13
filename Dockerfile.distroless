@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7
+#
+# Same two binaries, hardened further: the runtime layer is distroless
+# (no shell, no package manager, no libc utilities), which removes most of the
+# CVE surface of alpine and makes interactive compromise useless.
+#
+#   docker build -f Dockerfile.distroless -t banner-fingerprint:distroless .
+#   FP_IMAGE=banner-fingerprint:distroless docker compose up
+#
+# compose.yaml uses the alpine runtime by default only because it is a smaller
+# pull for environments that cannot reach gcr.io.
+
+ARG GO_VERSION=1.26
+
+FROM golang:${GO_VERSION}-alpine AS build
+WORKDIR /src
+ARG VERSION=docker
+ENV CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=vendor GOTOOLCHAIN=local
+COPY go.mod go.sum ./
+COPY vendor/ ./vendor/
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+        -o /out/fingerprint-server ./cmd/server \
+ && go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+        -o /out/fingerprint-client ./cmd/client
+
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+COPY --from=build /out/fingerprint-server /app/fingerprint-server
+COPY --from=build /out/fingerprint-client /app/fingerprint-client
+COPY rules/ /etc/fingerprint/
+USER nonroot:nonroot
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/app/fingerprint-server", "-healthcheck", "http://127.0.0.1:8080/health"]
+ENTRYPOINT ["/app/fingerprint-server"]
