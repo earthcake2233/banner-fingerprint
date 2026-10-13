@@ -216,10 +216,16 @@ docker build --target test .   # 在容器里跑 vet + 测试
 |--------|------|------|
 | 单元测试 | `go vet ./... && go test ./...` | 全部通过（fingerprint / jsonutil / httpapi 三个包） |
 | compose 语法 | `docker compose config --quiet` | 通过 |
-| 健康检查 | `curl 127.0.0.1:18080/health` | `{"rules":{"count":21,...,"status":"ok",...}}` |
+| 镜像构建 | `docker build --target test .` / `docker build .` | 两个阶段都成功；容器内 `go vet` + 单测全绿；runtime 镜像 32MB |
+| 一键启动 | `docker compose up -d --no-build server` | `server  Up (healthy)  127.0.0.1:8080->8080/tcp` |
+| 健康检查 | `curl 127.0.0.1:8080/health` | `{"rules":{"source":"/etc/fingerprint/rules.yaml","count":21},"status":"ok"}` |
 | 批量识别 | `curl -X POST .../fingerprint -d @samples/input.json` | 20 条 → 19 条识别成功，1 条 unknown，字段与题目示例一致 |
 | 容错解析 | `client -input samples/input-messy.txt`（非法 `\xNN` 转义） | 5 条全部正常返回，未报错 |
 | 规则溯源 | `client -explain` | 每条带 `rule_id`（如 `ssh-openssh`、`mysql-greeting`） |
+| 容器内网访问 | `docker compose run --rm client` | client 容器经 `http://server:8080` 取到全部结果，未走宿主端口 |
+| 容器加固 | `docker inspect banner-fingerprint-server-1` | `ReadonlyRootfs=true CapDrop=[ALL] SecOpt=[no-new-privileges:true] User=65532:65532 Pids=256 Mem=256MB` |
+| 规则热加载 | 往 `rules/rules.yaml` 追加一条规则 | 不重启、不重建：`/health` 的 `count` 从 21 → 22，新规则立即生效 |
+| 坏规则容错 | 把 `rules/rules.yaml` 写成非法 YAML | 服务保持 `healthy`，`/health` 回显解析错误，**继续用旧规则识别**（SSH 仍正常返回）；恢复文件后自动回滚成功 |
 | 日志/优雅停机 | 服务端日志 | JSON 结构化日志，含 `request_id`/`status`/`duration_ms` |
 
 样例数据的实际输出（节选）：
@@ -240,8 +246,7 @@ IP        PORT   PROTOCOL  PRODUCT        VERSION  OS_HINT  CONF
 protocols: FTP=3, HTTP=7, MySQL=2, Redis=3, SSH=3, TLS=1, unknown=1
 ```
 
-镜像构建 / compose 启动请在你自己的环境执行（本开发机的 Docker 无法访问镜像仓库，
-`docker compose up --build` 未在此机跑通，代码本身的多阶段 Dockerfile 已通过 `docker compose config` 校验）：
+复现整套流程：
 
 ```bash
 docker compose up --build        # 等价于：构建镜像 -> 起 server -> 等 /health 转绿 -> 跑 client 打印结果

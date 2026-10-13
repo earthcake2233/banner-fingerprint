@@ -34,6 +34,10 @@ RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
 
 # ----------------------------------------------------------------- test stage
 FROM build AS test
+# The tests assert that the shipped rules file, its embedded fallback copy and
+# the sample data stay in sync, so those two directories have to be present.
+COPY rules/ ./rules/
+COPY samples/ ./samples/
 RUN go vet ./... && go test ./...
 
 # -------------------------------------------------------------- runtime stage
