@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Multi-stage build:
 #   build  - compiles fully static binaries from *vendored* dependencies, so the
 #            image build needs no network access to the Go module proxy

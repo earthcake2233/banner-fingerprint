@@ -200,13 +200,20 @@ Dockerfile.distroless           更极致的运行时（distroless/static，无 
 ## 自测
 
 ```bash
+scripts/verify.sh              # 端到端验收：vet + 单测 + 起服务 + 20 项 HTTP 契约/边界检查，逐项打印 PASS/FAIL
 make test                      # 单元测试（识别深度、unknown 不报错、容错解析、HTTP 行为）
 make vet                       # go vet
 docker build --target test .   # 在容器里跑 vet + 测试
 ```
 
-样例数据：`samples/input.json`（20 条，覆盖 SSH / HTTP / MySQL / Redis / FTP / TLS / 未知），
-`samples/input-messy.txt`（故意使用非法 JSON 转义，用来验证容错解析）。
+样例数据：
+
+| 文件 | 用途 |
+|------|------|
+| `samples/task-example-input.json` | 题目给的 20 条参考输入（原样保留） |
+| `samples/task-example-expected.json` | 题目给的参考输出，被 `TestTaskExampleMatchesExpectedOutput` **逐字段断言** |
+| `samples/input.json` | 与参考输入等价的严格 JSON 版本（compose 里 client 的默认输入） |
+| `samples/input-messy.txt` | 故意写成非法 JSON（`\xNN` 转义），验证容错解析 |
 
 ## 验证记录
 
@@ -214,12 +221,15 @@ docker build --target test .   # 在容器里跑 vet + 测试
 
 | 验证项 | 命令 | 结果 |
 |--------|------|------|
+| 参考样例逐字段比对 | `go test ./internal/fingerprint -run TestTaskExample -v` | 题目给的 7 行参考输出**逐字段完全一致**（含空 `os_hint`、空 `version`、`confidence` 精确值） |
+| 参考数据识别率 | `go test -run TestEveryReferenceRecordIsIdentified -v` | 20 条输入 → 19 识别、1 unknown；直方图 `FTP:3 HTTP:7 MySQL:2 Redis:3 SSH:3 TLS:1 unknown:1` |
 | 单元测试 | `go vet ./... && go test ./...` | 全部通过（fingerprint / jsonutil / httpapi 三个包） |
+| 端到端验收脚本 | `scripts/verify.sh` | **20/20 PASS**：健康检查、批量识别、explain、逐行 verbatim 比对、空批次、400/405/404/413、非法转义容错、unknown 不报错，以及 200 批（每批 20 条）压测 2s 内完成且服务仍 healthy |
 | compose 语法 | `docker compose config --quiet` | 通过 |
 | 镜像构建 | `docker build --target test .` / `docker build .` | 两个阶段都成功；容器内 `go vet` + 单测全绿；runtime 镜像 32MB |
-| 一键启动 | `docker compose up -d --no-build server` | `server  Up (healthy)  127.0.0.1:8080->8080/tcp` |
+| 一键启动 | `COMPOSE_BAKE=false docker compose up -d --build server` | 一条命令完成构建 + 启动：`server  Up (healthy)  127.0.0.1:8080->8080/tcp` |
 | 健康检查 | `curl 127.0.0.1:8080/health` | `{"rules":{"source":"/etc/fingerprint/rules.yaml","count":21},"status":"ok"}` |
-| 批量识别 | `curl -X POST .../fingerprint -d @samples/input.json` | 20 条 → 19 条识别成功，1 条 unknown，字段与题目示例一致 |
+| 批量识别（宿主回环） | `curl -X POST 127.0.0.1:8080/fingerprint -d @samples/task-example-input.json` | 20 条 → 19 识别成功，1 条 unknown，字段与题目示例一致 |
 | 容错解析 | `client -input samples/input-messy.txt`（非法 `\xNN` 转义） | 5 条全部正常返回，未报错 |
 | 规则溯源 | `client -explain` | 每条带 `rule_id`（如 `ssh-openssh`、`mysql-greeting`） |
 | 容器内网访问 | `docker compose run --rm client` | client 容器经 `http://server:8080` 取到全部结果，未走宿主端口 |
@@ -227,6 +237,12 @@ docker build --target test .   # 在容器里跑 vet + 测试
 | 规则热加载 | 往 `rules/rules.yaml` 追加一条规则 | 不重启、不重建：`/health` 的 `count` 从 21 → 22，新规则立即生效 |
 | 坏规则容错 | 把 `rules/rules.yaml` 写成非法 YAML | 服务保持 `healthy`，`/health` 回显解析错误，**继续用旧规则识别**（SSH 仍正常返回）；恢复文件后自动回滚成功 |
 | 日志/优雅停机 | 服务端日志 | JSON 结构化日志，含 `request_id`/`status`/`duration_ms` |
+
+验证过程中实际发现并已修复的两个缺陷（都已推到仓库）：
+
+1. `test` 构建阶段没把 `rules/`、`samples/` 拷进构建上下文，容器内测试读不到文件 → 修复后 `docker build --target test .` 全绿；
+2. 引擎默认会给结果带上 `rule_id`，而接口契约只允许 7 个字段 → 改为库的默认输出就不含 `rule_id`，
+   只有 `?explain=1` 才追加（`TestResultJSONContract` 断言 JSON 键集合正好是 7 个）。
 
 样例数据的实际输出（节选）：
 

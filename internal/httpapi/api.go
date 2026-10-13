@@ -86,19 +86,19 @@ func (s *Server) handleFingerprint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	engine := s.store.Engine()
-	results := engine.FingerprintAll(inputs)
 
 	q := r.URL.Query()
 	explain := truthy(q.Get("explain"))
 	wrapped := truthy(q.Get("wrap")) || strings.Contains(strings.ToLower(q.Get("format")), "wrap")
 
-	unknown := 0
-	for i := range results {
-		if explain {
-			continue
-		}
-		results[i].RuleID = ""
+	var results []fingerprint.Result
+	if explain {
+		results = engine.FingerprintAllExplained(inputs)
+	} else {
+		results = engine.FingerprintAll(inputs)
 	}
+
+	unknown := 0
 	for _, res := range results {
 		if res.Protocol == fingerprint.Unknown {
 			unknown++

@@ -33,8 +33,15 @@ func (e *Engine) Rules() []*Rule { return e.rules }
 func (e *Engine) Source() string { return e.source }
 
 // Fingerprint identifies a single input. It never fails: unmatched inputs yield
-// Protocol "unknown".
-func (e *Engine) Fingerprint(in Input) Result {
+// Protocol "unknown". The result carries exactly the seven documented fields.
+func (e *Engine) Fingerprint(in Input) Result { return e.identify(in, false) }
+
+// FingerprintExplained is Fingerprint plus the id of the rule that matched,
+// which the HTTP API exposes for ?explain=1. Keeping it a separate entry point
+// means callers that do not ask for provenance never see the field.
+func (e *Engine) FingerprintExplained(in Input) Result { return e.identify(in, true) }
+
+func (e *Engine) identify(in Input, explain bool) Result {
 	res := Result{
 		IP:       in.IP,
 		Port:     in.Port,
@@ -53,7 +60,9 @@ func (e *Engine) Fingerprint(in Input) Result {
 		res.Version = expand(r.Version, caps)
 		res.OSHint = r.osHint(in.Banner, caps)
 		res.Confidence = round2(r.Confidence)
-		res.RuleID = r.ID
+		if explain {
+			res.RuleID = r.ID
+		}
 		return res
 	}
 	return res
@@ -61,9 +70,18 @@ func (e *Engine) Fingerprint(in Input) Result {
 
 // FingerprintAll identifies a batch, preserving input order.
 func (e *Engine) FingerprintAll(in []Input) []Result {
+	return e.identifyAll(in, false)
+}
+
+// FingerprintAllExplained identifies a batch and reports the matching rule ids.
+func (e *Engine) FingerprintAllExplained(in []Input) []Result {
+	return e.identifyAll(in, true)
+}
+
+func (e *Engine) identifyAll(in []Input, explain bool) []Result {
 	out := make([]Result, len(in))
 	for i := range in {
-		out[i] = e.Fingerprint(in[i])
+		out[i] = e.identify(in[i], explain)
 	}
 	return out
 }

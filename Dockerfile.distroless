@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Same two binaries, hardened further: the runtime layer is distroless
 # (no shell, no package manager, no libc utilities), which removes most of the
 # CVE surface of alpine and makes interactive compromise useless.
