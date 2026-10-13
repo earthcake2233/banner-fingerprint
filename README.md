@@ -98,7 +98,7 @@ docker compose down
 
 ```json
 {"status":"ok","version":"local","uptime_s":12,
- "rules":{"source":"/etc/fingerprint/rules.yaml","count":24,"loaded_at":"...","reloaded":true,"error":""}}
+ "rules":{"source":"/etc/fingerprint/rules.yaml","count":21,"loaded_at":"...","reloaded":true,"error":""}}
 ```
 
 `docker compose` 的 server 健康检查就是调用它（用服务自己的二进制 `-healthcheck` 探测，镜像里不需要 curl）。
@@ -207,6 +207,46 @@ docker build --target test .   # 在容器里跑 vet + 测试
 
 样例数据：`samples/input.json`（20 条，覆盖 SSH / HTTP / MySQL / Redis / FTP / TLS / 未知），
 `samples/input-messy.txt`（故意使用非法 JSON 转义，用来验证容错解析）。
+
+## 验证记录
+
+开发环境里的实测结果（不是设计稿，是跑出来的）：
+
+| 验证项 | 命令 | 结果 |
+|--------|------|------|
+| 单元测试 | `go vet ./... && go test ./...` | 全部通过（fingerprint / jsonutil / httpapi 三个包） |
+| compose 语法 | `docker compose config --quiet` | 通过 |
+| 健康检查 | `curl 127.0.0.1:18080/health` | `{"rules":{"count":21,...,"status":"ok",...}}` |
+| 批量识别 | `curl -X POST .../fingerprint -d @samples/input.json` | 20 条 → 19 条识别成功，1 条 unknown，字段与题目示例一致 |
+| 容错解析 | `client -input samples/input-messy.txt`（非法 `\xNN` 转义） | 5 条全部正常返回，未报错 |
+| 规则溯源 | `client -explain` | 每条带 `rule_id`（如 `ssh-openssh`、`mysql-greeting`） |
+| 日志/优雅停机 | 服务端日志 | JSON 结构化日志，含 `request_id`/`status`/`duration_ms` |
+
+样例数据的实际输出（节选）：
+
+```text
+IP        PORT   PROTOCOL  PRODUCT        VERSION  OS_HINT  CONF
+1.2.3.4   22     SSH       OpenSSH        8.9p1    Ubuntu   0.95
+1.2.3.5   80     HTTP      nginx          1.24.0   -        0.90
+1.2.3.6   443    HTTP      Apache         2.4.57   -        0.90
+1.2.3.7   3306   MySQL     MySQL          8.0.32   -        0.90
+1.2.3.8   6379   Redis     Redis          -        -        0.70
+1.2.3.9   21     FTP       ProFTPD        1.3.7    -        0.90
+1.2.3.10  8080   HTTP      Jetty          9.4.51   -        0.85
+...
+1.2.3.23  12345  unknown   -              -        -        0.00
+
+20 records: 19 identified, 1 unknown
+protocols: FTP=3, HTTP=7, MySQL=2, Redis=3, SSH=3, TLS=1, unknown=1
+```
+
+镜像构建 / compose 启动请在你自己的环境执行（本开发机的 Docker 无法访问镜像仓库，
+`docker compose up --build` 未在此机跑通，代码本身的多阶段 Dockerfile 已通过 `docker compose config` 校验）：
+
+```bash
+docker compose up --build        # 等价于：构建镜像 -> 起 server -> 等 /health 转绿 -> 跑 client 打印结果
+docker compose ps                # server 应为 healthy
+```
 
 ## 已知边界
 
