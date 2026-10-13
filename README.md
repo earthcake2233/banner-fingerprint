@@ -257,4 +257,13 @@ docker compose ps                # server 应为 healthy
 
 - 只做"给定 banner 的离线识别"：不主动发起扫描、不做 TLS 握手或 HTTP 请求（避免把指纹系统变成扫描器）；
 - 版本号依赖 banner 自曝，伪造 banner 可能被误判——`confidence` 就是给这种不确定性留的余量；
-- 规则是"高优先级命中即停"的线性匹配；规则到数千条量级时建议再加端口/前缀索引（当前 24 条无需）。
+- 规则是"高优先级命中即停"的线性匹配；规则到数千条量级时建议再加端口/前缀索引（当前 21 条无需）。
+
+## 排障
+
+- `docker compose build` 报 `panic: slice bounds out of range`：这是部分 compose v2.40.x 的 bake 缺陷
+  （用一个最小 compose 项目同样能复现，与本项目的 compose 文件无关）。绕过方式：
+  `COMPOSE_BAKE=false docker compose up -d --build`，或先 `docker build -t banner-fingerprint:local .`
+  再 `docker compose up --no-build`。
+- 拉不到 `golang:1.26-alpine` / `alpine:3.21`：若本机走镜像加速，把对应镜像 retag 成这两个名字即可离线构建
+  （构建阶段本身不需要网络，依赖已 vendor）。
